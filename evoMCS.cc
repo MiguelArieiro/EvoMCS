@@ -627,7 +627,6 @@ int main(int argc, char *argv[])
     }
 
     Simulator::Run();
-    std::cout << "test" << std::endl;
 
     if (tracing)
     {
@@ -639,8 +638,6 @@ int main(int argc, char *argv[])
                   << " Mbit/s" << std::endl;
       }
     }
-
-    std::cout << "test" << std::endl;
 
     std::string outputDir = "";
     std::string simTag = "evoMCS" + std::to_string(r);
@@ -657,7 +654,6 @@ int main(int argc, char *argv[])
 
     std::regex server_regex("^172.*.0.1$");
 
-    std::cout << "test" << std::endl;
     if (verbose)
     {
 
