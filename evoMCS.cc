@@ -37,7 +37,7 @@ using namespace ns3;
 
 #define MAX_NODES 2048
 
-bool verbose = true;
+bool verbose = false;
 
 std::vector<uint64_t> bytesReceived(MAX_NODES);
 
@@ -100,16 +100,16 @@ int main(int argc, char *argv[])
   double duration = 10.0;           // seconds
   double powAp = 21.0;              // dBm
   double powSta = 10.0;             // dBm
-  double ccaEdTrAp = -62;           // dBm
-  double ccaEdTrSta = -62;          // dBm
-  double rxSensAp = -92;            // dBm
-  double rxSensSta = -92;           // dBm
+  double ccaEdTrAp = -62.0;         // dBm
+  double ccaEdTrSta = -62.0;        // dBm
+  double rxSensAp = -92.0;          // dBm
+  double rxSensSta = -92.0;         // dBm
   uint32_t tcpPayloadSize = 60;     // bytes
   uint32_t udpPayloadSize = 40;     // bytes
   int32_t mcs = 9;                  // MCS value
-  uint64_t dataRate = 10000;        // bits/s
+  uint64_t dataRate = 100000;       // bits/s
   double distance = 25;             // mobility model side = 2 * distance
-  int technology = 0;               // technology to be used 802.11ax = 0, 5G = 1;
+  int technology = 0;               // technology to be used 802.11ax = 0, 802.11n = 1;
   int frequency = 5;                // frequency selection
   int channelWidth = 20;            // channel number
   int numApAntennas = 4;            // number of AP Antenas
@@ -200,6 +200,8 @@ int main(int argc, char *argv[])
 
   std::vector<double> avg_throughput(runs);
   std::vector<double> avg_energy(runs);
+  std::vector<double> avg_packet_loss(runs);
+
   for (uint32_t r = 0; r < runs; r++)
   {
     SeedManager::SetRun(r + 1);
@@ -341,7 +343,7 @@ int main(int argc, char *argv[])
     }
     else
     {
-      // if no supported technology is selected
+      //if no supported technology is selected
       return 0;
     }
 
@@ -458,7 +460,7 @@ int main(int argc, char *argv[])
       }
     }
 
-    // AP pos
+    //AP pos
     mobility.SetPositionAllocator("ns3::GridPositionAllocator", "MinX", DoubleValue(0), "MinY",
                                   DoubleValue(0), "DeltaX", DoubleValue(distance), "DeltaY",
                                   DoubleValue(distance), "GridWidth", UintegerValue(edge_size),
@@ -467,7 +469,7 @@ int main(int argc, char *argv[])
     mobility.Install(wifiApNodes);
     //std::cout << "Mobility model configured\n";
 
-    // Routing
+    //Routing
     InternetStackHelper stack;
 
     Ipv4StaticRoutingHelper staticRoutingHelper;
@@ -632,8 +634,8 @@ int main(int argc, char *argv[])
     {
       for (int32_t i = 0; i < numAp; i++)
       {
-        double throughput = static_cast<double>(bytesReceived[numSta * numAp + i]) * 8 /
-                            1000 / 1000 / duration;
+        double throughput = static_cast<double>(bytesReceived[numSta * numAp + i]) * 8.0 /
+                            1000.0 / 1000.0 / duration;
         std::cout << "Physical throughput for BSS " << i + 1 << ": " << throughput
                   << " Mbit/s" << std::endl;
       }
@@ -649,10 +651,9 @@ int main(int argc, char *argv[])
         DynamicCast<Ipv4FlowClassifier>(flowMonHelper.GetClassifier());
     FlowMonitor::FlowStatsContainer stats = flowMonitor->GetFlowStats();
 
+    std::regex server_regex("^172.*.0.1$");
     double averageFlowThroughput = 0.0;
     double averageFlowDelay = 0.0;
-
-    std::regex server_regex("^172.*.0.1$");
 
     if (verbose)
     {
@@ -687,8 +688,8 @@ int main(int argc, char *argv[])
           protoStream.str("UDP");
         }
         outFile << i->first << ";";
-        outFile << t.sourceAddress << ";" << t.sourcePort << ";" << t.destinationAddress
-                << ";" << t.destinationPort << ";";
+        outFile << t.sourceAddress << ":" << t.sourcePort << ";" << t.destinationAddress
+                << ":" << t.destinationPort << ";";
         outFile << protoStream.str() << ";";
 
         std::stringstream ss;
@@ -743,18 +744,39 @@ int main(int argc, char *argv[])
         std::cout << f.rdbuf();
       }
     }
-    //End Simulator
+
+    for (std::map<FlowId, FlowMonitor::FlowStats>::const_iterator i = stats.begin();
+         i != stats.end(); ++i)
+    {
+      std::stringstream ss;
+      ss << classifier->FindFlow(i->first).sourceAddress;
+
+      if (!std::regex_match(ss.str(), server_regex))
+      {
+        int lost_packets = (i->second.txPackets - i->second.rxPackets);
+        avg_packet_loss[r] +=
+            static_cast<double>(lost_packets) / static_cast<double>(i->second.txPackets);
+      }
+    }
+    avg_packet_loss[r] = avg_packet_loss[r] / static_cast<double>(numSta * numAp);
+
+    if (verbose)
+    {
+      std::cout << "Avg packet loss - run " << r << " " << avg_packet_loss[r] << std::endl;
+    }
 
     //get total energy consumed
     for (DeviceEnergyModelContainer::Iterator iter = deviceModels.Begin();
          iter != deviceModels.End(); iter++)
     {
       double energyConsumed = (*iter)->GetTotalEnergyConsumption();
-      avg_energy[r] += static_cast<double>(energyConsumed) / (duration * numAp * numSta);
+      avg_energy[r] += static_cast<double>(energyConsumed) /
+                       static_cast<double>(duration * numAp * numSta);
 
       if (verbose)
       {
-        std::cout << static_cast<double>(energyConsumed) / (duration * numAp * numSta)
+        std::cout << static_cast<double>(energyConsumed) /
+                         static_cast<double>(duration * numAp * numSta)
                   << std::endl;
       }
     }
@@ -764,15 +786,19 @@ int main(int argc, char *argv[])
       std::cout << "Avg energy - run " << r << " " << avg_energy[r] << std::endl;
     }
 
+    //geet throughput
     for (int32_t i = 0; i < numAp; i++)
     {
       double bytesRx =
           static_cast<double>(DynamicCast<PacketSink>(serverApps.Get(i))->GetTotalRx());
-      avg_throughput[r] += static_cast<double>(bytesRx) / (duration * numAp * numSta);
+      avg_throughput[r] +=
+          static_cast<double>(bytesRx) / static_cast<double>(duration * numAp * numSta);
 
       if (verbose)
       {
-        std::cout << static_cast<double>(bytesRx) / (duration * numAp * numSta) * 8.0 << std::endl;
+        std::cout << static_cast<double>(bytesRx) /
+                         static_cast<double>(duration * numAp * numSta) * 8.0
+                  << std::endl;
       }
     }
 
@@ -781,18 +807,21 @@ int main(int argc, char *argv[])
       std::cout << "Avg throughput - run " << r << " " << avg_throughput[r] * 8.0 << std::endl;
     }
 
+    //End Simulator
     Simulator::Destroy();
   }
 
   double t_energy = 0.0;
   double t_bitrate = 0.0;
+  double t_packet_loss = 0.0;
 
   for (uint32_t r = 0; r < runs; r++)
   {
-    t_energy += avg_energy[r] / runs;
-    t_bitrate += avg_throughput[r] * 8.0 / runs;
+    t_energy += avg_energy[r] / static_cast<double>(runs);
+    t_bitrate += avg_throughput[r] * 8.0 / static_cast<double>(runs);
+    t_packet_loss += avg_packet_loss[r] / static_cast<double>(runs);
   }
 
-  std::cout << t_energy << "\t" << t_bitrate << std::endl;
+  std::cout << t_energy << "\t" << t_bitrate << "\t" << t_packet_loss << std::endl;
   return 0;
 }
